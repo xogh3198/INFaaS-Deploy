@@ -13,8 +13,9 @@ from the node's HF cache (same files as Lumina) -> GPU, then WARMUP_QUERIES
 warmup queries [C common_model_util.cc WARMUP_QUERIES]; unloading frees the GPU
 memory.
 
-Preprocessing is Lumina's path, vendored unchanged (JPEG in, DALI or PIL), so
-both systems execute the same work per request [PLAN A-04].
+PREPROCESS_BACKEND=pil uses Proteus-compatible CPU PIL RGB + HF slow processing.
+The vendored DALI path remains available with auto/dali; no Proteus service is
+called and no INFaaS placement/scaling policy is replaced.
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from PIL import Image
 
-from infaas.common import config
+from infaas.common import config, preprocessing
 from infaas.common.naming import parse_variant
 from infaas.vendor.lumina import dali_preprocess, models
 
@@ -48,12 +49,7 @@ def _autoclass(name: str):
 
 
 def _get_processor(model_id: str):
-    # same as Lumina podexec/worker/server.py _get_processor
-    from transformers import AutoImageProcessor, AutoProcessor
-    try:
-        return AutoImageProcessor.from_pretrained(model_id)
-    except Exception:
-        return AutoProcessor.from_pretrained(model_id)
+    return preprocessing.get_processor(model_id)
 
 
 def _decode(out, model, processor, image_size: Tuple[int, int]) -> Tuple[str, List[Box]]:
@@ -175,10 +171,14 @@ class Instance:
             pixel_values, pre_wait = dali_preprocess.run_timed(self.dali_cfg, image_bytes)
             inputs = {"pixel_values": pixel_values}
         else:
-            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            with Image.open(io.BytesIO(image_bytes)) as source:
+                img = source.convert("RGB")
             img_size = img.size
             t_decode = time.perf_counter()
-            inputs = dict(self.processor(images=img, return_tensors="pt"))
+            # Same list-of-PIL-images input as the Proteus GPU runtime.
+            inputs = dict(self.processor(images=[img], return_tensors="pt"))
+            if any(value.device.type != "cpu" for value in inputs.values()):
+                raise RuntimeError("PIL preprocessing must produce CPU tensors before H2D")
             pre_wait = 0.0
         t_pre = time.perf_counter()
         out, t_locked, t_fwd = self._forward(inputs)
@@ -202,12 +202,25 @@ class Runtime:
     """The set of instances on this worker, with load/unload."""
 
     def __init__(self, hw: str) -> None:
+        selected_backend = preprocessing.backend()
+        if os.environ.get("REQUIRE_CUDA", "false").lower() in {"1", "true", "yes"} and DEVICE != "cuda":
+            raise RuntimeError("CUDA unavailable; comparison CPU-inference fallback is forbidden")
+        torch.set_num_threads(preprocessing.cpu_threads())
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
         self.hw = hw
         self._instances: Dict[str, Instance] = {}
         self._loading: Dict[str, threading.Event] = {}
         self._errors: Dict[str, str] = {}
         self._lock = threading.Lock()
-        self._probe = dali_preprocess.textured_jpeg() if dali_preprocess.available() else None
+        available = selected_backend != "pil" and dali_preprocess.available()
+        if selected_backend == "dali" and not available:
+            raise RuntimeError("DALI requested but unavailable; build with INSTALL_DALI=1")
+        self._probe = dali_preprocess.textured_jpeg() if available else None
+        log.info("preprocessing=%s cpu_threads=%d processor_use_fast=False",
+                 "PIL RGB + HF slow AutoImageProcessor (CPU)" if selected_backend == "pil" else dali_preprocess.status(),
+                 torch.get_num_threads())
         buf = io.BytesIO()
         Image.new("RGB", (224, 224), color=(127, 127, 127)).save(buf, format="JPEG")
         self._fallback_jpeg = buf.getvalue()
@@ -277,7 +290,7 @@ class Runtime:
     def _build(self, variant: str, model_id: str) -> Instance:
         t0 = time.perf_counter()
         cls = _autoclass(models.MODEL_AUTOCLASS[model_id])
-        model = cls.from_pretrained(model_id).eval()
+        model = cls.from_pretrained(model_id, **preprocessing.checkpoint_options(model_id)).eval().float()
         processor = _get_processor(model_id)
         model.to(DEVICE)
         dali_cfg, note = None, "PIL"

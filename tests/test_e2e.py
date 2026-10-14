@@ -26,7 +26,7 @@ from infaas.proto import podexec_pb2, podexec_pb2_grpc
 from infaas.proto.internal import placement_pb2, query_pb2_grpc, sys_monitor_pb2_grpc
 from infaas.worker.context import WorkerContext
 from infaas.worker.executor import QueryService, SysStatusService
-from infaas.worker.monitor import Monitor
+from infaas.worker.monitor import Monitor, CpuMeter
 
 GB = 1 << 30
 
@@ -91,7 +91,12 @@ def _start(servicers):
 
 
 @pytest.fixture
-def cluster():
+def cluster(monkeypatch):
+    # These are fake-runtime gRPC tests, not host CPU utilization tests. Windows
+    # has no Linux cgroup/affinity API; leave production Linux monitoring intact.
+    import os
+    if not hasattr(os, "sched_getaffinity"):
+        monkeypatch.setattr(CpuMeter, "_ncpu", staticmethod(lambda: 1.0))
     server = fakeredis.FakeServer()
     new_md = lambda: RedisMetadata(fakeredis.FakeRedis(server=server, decode_responses=True))  # noqa: E731
     md = new_md()

@@ -34,7 +34,7 @@ from typing import Dict, List
 import torch
 from PIL import Image
 
-from infaas.common import config
+from infaas.common import config, preprocessing
 from infaas.common.naming import variant_name
 from infaas.vendor.lumina import models
 from infaas.worker.inputs import nominal_size
@@ -129,6 +129,7 @@ def profile(runtime: Runtime, gpu: GpuSampler, model: str, image: bytes,
                      "image_size": [iw, ih], "image_bytes": len(image)}
         mem1 = _used(gpu)
         dali, dali_note = bool(inst.dali_cfg is not None), inst.dali_note
+        checkpoint_commit = getattr(inst.model.config, "_commit_hash", None)
     finally:
         runtime.unload(v)
 
@@ -143,6 +144,8 @@ def profile(runtime: Runtime, gpu: GpuSampler, model: str, image: bytes,
         "max_batch": 1,
         "task": models.category_of(model_id) or "",
         "profile_mode": mode,
+        "preprocessing_config": preprocessing.measured_fingerprint(model_id, runtime.hw),
+        "checkpoint_commit": checkpoint_commit,
         "load_latency_ms": round(load_latency, 3),
         **summary,
         "sat_qps": round(sat_qps, 3),

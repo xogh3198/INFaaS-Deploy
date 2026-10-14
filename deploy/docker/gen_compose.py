@@ -35,6 +35,7 @@ DEPLOY_KEYS = {
     "LOG_DIR", "CONTROLLER_IMAGE", "WORKER_IMAGE", "NETWORK", "PUBLISH_ADDR",
     "WORKER_BASE_PORT", "ROLE", "CONTROLLER_HOST", "ADVERTISE_HOST", "EXTRA_WORKERS",
     "WORKER_PREFIX", "HOST_PORT_OFFSET", "MODEL_NAME", "INPUT_IMAGE", "SLO_MS",
+    "PYTHON_IMAGE", "INSTALL_DALI",
 }
 # keys this script sets per service or derives; the env file must not set them
 RESERVED = {
@@ -208,6 +209,15 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
         raise ConfigError(f"set by gen_compose.py, remove from the env file: {clash}")
     if cfg.get("WORKER_MODE", "static").lower() != "static":
         raise ConfigError("docker runs a fixed worker list: WORKER_MODE must be static")
+    backend = cfg.get("PREPROCESS_BACKEND", "pil").strip().lower()
+    if backend not in {"pil", "dali", "auto"}:
+        raise ConfigError("PREPROCESS_BACKEND: pil | dali | auto")
+    try:
+        cpu_threads = int(cfg.get("CPU_THREADS", "2"))
+    except ValueError as exc:
+        raise ConfigError("CPU_THREADS must be a positive integer") from exc
+    if cpu_threads < 1:
+        raise ConfigError("CPU_THREADS must be a positive integer")
 
     role = cfg.get("ROLE", "all").lower()
     network = cfg.get("NETWORK", "bridge").lower()
@@ -278,7 +288,7 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
             **common,
             "environment": {
                 "WORKER_NAME": name, "GPU_TYPE": g.hw, "WORKER_PORT": str(port),
-                "PREPROCESS_BACKEND": "auto",
+                "PREPROCESS_BACKEND": backend, "CPU_THREADS": str(cpu_threads),
                 "PREPROCESS_MODE": modes.get(g.hw, "cpu_decode_gpu"),
                 "REDIS_HOST": redis_host, "REDIS_PORT": str(REDIS_PORT),
                 "CONTROLLER_ADDR": f"{ctrl_host}:{PORTS['placement']}",
@@ -365,6 +375,11 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
         "ORCHESTRATOR": "static",
         "WORKER_MODE": "static",
         "STATIC_WORKERS": ",".join(f"{n}={hw}@{a}" for n, hw, a in workers),
+        "PREPROCESS_BACKEND": backend, "CPU_THREADS": str(cpu_threads),
+        "PREPROCESS_MODES": cfg.get("PREPROCESS_MODES", ""),
+        "PROFILE_REQUIRE_PREPROCESS_MATCH": cfg.get("PROFILE_REQUIRE_PREPROCESS_MATCH", "true"),
+        "TORCH_VERSION": cfg.get("TORCH_VERSION", "2.11.0+cu126"),
+        "TORCHVISION_VERSION": cfg.get("TORCHVISION_VERSION", "0.26.0+cu126"),
     })
     info = {"role": role, "network": network, "gpus": gpus, "workers": workers,
             "local": local, "hw_types": hw_types,

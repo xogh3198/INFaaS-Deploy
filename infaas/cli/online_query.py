@@ -38,7 +38,8 @@ def main() -> int:
         tm = dict(r.timings)
         print(f"{'OK ' if ok else 'REJ'} e2e={e2e:7.1f}ms variant={r.variant or '-':32s} "
               f"worker={r.worker or '-':32s} path={r.path:8s} label={r.label!r} "
-              f"load={tm.get('worker.load', 0):.0f}ms decide={tm.get('srv.decide', 0):.2f}ms"
+              f"load={tm.get('worker.load', 0):.0f}ms decide={tm.get('srv.decide', 0):.2f}ms "
+              f"dali={tm.get('worker.dali', -1):.0f} slo={'PASS' if ok and e2e <= args.slo else 'MISS'}"
               + ("" if ok else f" [{r.reject_kind}] {r.status.msg} suggest={r.suggested_variant}"))
     return rc
 

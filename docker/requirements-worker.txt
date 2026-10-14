@@ -1,0 +1,11 @@
+# Same image-processing/ML versions as Proteus deploy/docker/requirements-gpu.txt.
+transformers==5.19.0
+grpcio==1.84.0
+grpcio-health-checking==1.84.0
+protobuf==7.36.2
+pillow==12.1.1
+numpy==2.2.6
+accelerate
+safetensors
+redis
+nvidia-ml-py

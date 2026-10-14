@@ -13,7 +13,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from infaas.common import config
+from infaas.common import config, preprocessing
+from infaas.vendor.lumina import models
 
 REQUIRED = ("variant", "model", "hardware", "inf_latency_ms", "load_latency_ms",
             "sat_qps", "peak_memory_bytes")
@@ -34,6 +35,18 @@ def mode_of(p: dict) -> str:
 def matches_mode(p: dict, mode: Optional[str] = None) -> bool:
     """Latencies from the two modes mean different things and must not be mixed."""
     return mode_of(p) == (mode or config.PROFILE_MODE)
+
+
+def matches_preprocessing(p: dict) -> bool:
+    recorded = p.get("preprocessing_config")
+    if recorded is None:
+        return not config.PROFILE_REQUIRE_PREPROCESS_MATCH
+    model_id = models.resolve(p.get("model", ""))
+    return bool(model_id and recorded == preprocessing.fingerprint(model_id, p.get("hardware", "")))
+
+
+def compatible(p: dict) -> bool:
+    return matches_mode(p) and matches_preprocessing(p)
 
 
 def path_for(variant: str, root: Optional[str] = None) -> Path:

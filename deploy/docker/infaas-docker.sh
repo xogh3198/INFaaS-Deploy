@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# INFaaS on docker (one host, one worker container per GPU). See docs/DOCKER.md.
+# INFaaS on docker (one host, one worker container per GPU). See setting_readme.md.
 #
 #   deploy/docker/infaas-docker.sh gpus                 GPU indices + a suggested GPUS line
 #   deploy/docker/infaas-docker.sh build                build controller/worker images
+#   deploy/docker/infaas-docker.sh doctor               CPU processor/cache + selected GPU check
 #   deploy/docker/infaas-docker.sh download [--models a,b]   fetch weights into MODEL_DIR
 #   deploy/docker/infaas-docker.sh gen                  write generated/docker-compose.yml
 #   deploy/docker/infaas-docker.sh up                   gen + start everything, wait for workers
@@ -47,7 +48,7 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   settings)
     printf 'Settings file: %s\n' "$ENV_FILE"
-    for key in GPUS HW_COST MODEL_NAME INPUT_IMAGE SLO_MS MODEL_DIR PROFILE_DIR LOG_DIR PROFILE_MODE; do
+    for key in GPUS HW_COST MODEL_NAME MODEL_REVISIONS INPUT_IMAGE SLO_MS MODEL_DIR PROFILE_DIR LOG_DIR PROFILE_MODE PREPROCESS_BACKEND CPU_THREADS TORCH_VERSION TORCHVISION_VERSION INSTALL_DALI; do
       printf '%s=%s\n' "$key" "$(get "$key")"
     done
     echo 'BATCH_SIZE=1 (this deployment does not implement configurable batching)' ;;
@@ -55,7 +56,18 @@ case "$cmd" in
     python3 "$HERE/gen_compose.py" --suggest ;;
   build)
     docker build -f "$ROOT/docker/controller.Dockerfile" -t "$CONTROLLER_IMAGE" "$ROOT"
-    docker build -f "$ROOT/docker/worker.Dockerfile" -t "$WORKER_IMAGE" "$ROOT" ;;
+    docker build -f "$ROOT/docker/worker.Dockerfile" -t "$WORKER_IMAGE" \
+      --build-arg "PYTHON_IMAGE=$(get PYTHON_IMAGE python:3.11-slim-bookworm)" \
+      --build-arg "TORCH_VERSION=$(get TORCH_VERSION 2.11.0+cu126)" \
+      --build-arg "TORCHVISION_VERSION=$(get TORCHVISION_VERSION 0.26.0+cu126)" \
+      --build-arg "INSTALL_DALI=$(get INSTALL_DALI 0)" "$ROOT" ;;
+  doctor)
+    gen
+    services=$(python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); d=json.loads("\n".join(p.read_text().splitlines()[1:])); print("\n".join(n for n,s in d["services"].items() if "WORKER_NAME" in s.get("environment", {})))' "$OUT/docker-compose.yml")
+    [[ -n "$services" ]] || { echo 'No local GPU workers selected.' >&2; exit 1; }
+    while IFS= read -r service; do
+      "${COMPOSE[@]}" run --rm --no-deps "$service" python -m infaas.cli.doctor --model "$(get MODEL_NAME resnet-50)"
+    done <<< "$services" ;;
   download)
     MODEL_DIR="$(get MODEL_DIR /data/podexec-models)"
     MODEL_DIR="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$MODEL_DIR")"
@@ -74,7 +86,8 @@ case "$cmd" in
     if [[ "$all_models" -eq 0 && "$selected" -eq 0 ]]; then
       download_args=(--models "$(get MODEL_NAME resnet-50)" "${download_args[@]}")
     fi
-    docker run --rm -v "$MODEL_DIR:/models" -e HF_HOME=/models -e HF_HUB_OFFLINE=0 \
+    docker run --rm -v "$MODEL_DIR:/models" -e HF_HOME=/models -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 \
+      -e "MODEL_REVISIONS=$(get MODEL_REVISIONS)" \
       "$WORKER_IMAGE" python -m infaas.cli.download_models "${download_args[@]}" ;;
   gen)
     gen "$@" ;;

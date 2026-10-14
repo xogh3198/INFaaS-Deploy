@@ -37,14 +37,14 @@ log = logging.getLogger("registrar")
 def import_profiles(md: RedisMetadata, root: Optional[str] = None) -> int:
     n = skipped = 0
     for p in profiles.load_all(root):
-        if not profiles.matches_mode(p):
+        if not profiles.compatible(p):
             skipped += 1
             continue
         md.add_model(p)
         n += 1
     if skipped:
-        log.warning("skipped %d stored profiles measured with another PROFILE_MODE "
-                    "(current: %s); register those models again", skipped, config.PROFILE_MODE)
+        log.warning("skipped %d stored profiles with incompatible mode/preprocessing/checkpoint; "
+                    "register --reprofile (current PROFILE_MODE=%s)", skipped, config.PROFILE_MODE)
     return n
 
 
@@ -70,6 +70,8 @@ class Registrar(modelreg_pb2_grpc.ModelRegServicer):
                 return self._reply(False, f"profile was measured with PROFILE_MODE="
                                           f"{profiles.mode_of(p)}, this deployment uses "
                                           f"{config.PROFILE_MODE}")
+            if not profiles.matches_preprocessing(p):
+                return self._reply(False, "profile preprocessing/checkpoint mismatch; register --reprofile")
             self.md.add_model(p)
             profiles.save(p)
             self.registry.invalidate()
@@ -95,7 +97,7 @@ class Registrar(modelreg_pb2_grpc.ModelRegServicer):
     def _one(self, model: str, hw: str, image: bytes, reprofile: bool) -> Tuple[str, str]:
         v = variant_name(model, hw)
         stored = None if reprofile else profiles.load(v)
-        if stored is not None and profiles.matches_mode(stored):
+        if stored is not None and profiles.compatible(stored):
             self.md.add_model(stored)
             return v, ""
         if not image and config.PROFILE_MODE == "service":
@@ -116,6 +118,8 @@ class Registrar(modelreg_pb2_grpc.ModelRegServicer):
         if r.status.status != ist.SUCCESS:
             return v, f"{v}: {r.status.msg}"
         p = profiles.validate(json.loads(r.profile_json))
+        if not profiles.compatible(p):
+            return v, f"{v}: worker profile does not match controller preprocessing/mode/checkpoint settings"
         p["profiled_on"] = worker
         profiles.save(p)
         self.md.add_model(p)

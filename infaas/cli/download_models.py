@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from infaas.vendor.lumina import models
+from infaas.common import preprocessing
 
 
 def main() -> int:
@@ -39,19 +40,15 @@ def main() -> int:
         return 0
 
     import transformers
-    from transformers import AutoImageProcessor, AutoProcessor
 
     ok = fail = 0
     for n, model_id in enumerate(ids, 1):
         t0 = time.perf_counter()
         print(f"[{n:>2}/{len(ids)}] {model_id} ...", end=" ", flush=True)
         try:
-            getattr(transformers, models.MODEL_AUTOCLASS[model_id]).from_pretrained(model_id)
-            # the worker loads the processor the same way (runtime._get_processor)
-            try:
-                AutoImageProcessor.from_pretrained(model_id)
-            except Exception:  # noqa: BLE001
-                AutoProcessor.from_pretrained(model_id)
+            getattr(transformers, models.MODEL_AUTOCLASS[model_id]).from_pretrained(
+                model_id, **preprocessing.checkpoint_options(model_id, offline=False))
+            preprocessing.get_processor(model_id, offline=False)
             print(f"OK ({time.perf_counter() - t0:.1f}s)")
             ok += 1
         except Exception as e:  # noqa: BLE001

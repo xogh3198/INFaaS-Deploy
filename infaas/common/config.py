@@ -147,6 +147,9 @@ EXECUTOR_CACHE_S = _f("EXECUTOR_CACHE_S", 1.0)
 #             measured with an image given at registration [U C6] — used for the
 #             Lumina comparison (k8s/configmap.yaml)
 PROFILE_MODE = _s("PROFILE_MODE", "original").lower()
+# Docker comparisons reject pre-CPU-path profiles; non-Docker legacy imports
+# retain their previous behavior unless this option is explicitly enabled.
+PROFILE_REQUIRE_PREPROCESS_MATCH = _b("PROFILE_REQUIRE_PREPROCESS_MATCH", False)
 # [C profile_model.sh] latency = average of repeated single-concurrency runs
 PROFILE_RUNS = _i("PROFILE_RUNS", 30)
 # [N] saturation throughput Q_ij (paper Table 2 / §4.2.1) is measured closed-loop

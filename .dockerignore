@@ -7,3 +7,10 @@ results
 docs
 profiles
 .pytest_cache
+.git
+.env
+data
+inputs
+deploy/docker/data
+deploy/docker/generated
+deploy/docker/*.local.env

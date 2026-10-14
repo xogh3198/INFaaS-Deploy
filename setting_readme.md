@@ -2,6 +2,9 @@
 
 저장소 루트에서 실행합니다. 사전 학습 가중치로 실제 GPU 추론을 수행합니다.
 
+**Proteus와 전처리를 통일하는 V100·ResNet-50 실험은 [CPU_PREPROCESSING.md](CPU_PREPROCESSING.md)**에
+별도 전체 env와 재실행 명령을 정리했습니다. 기존 DALI 결과는 보존합니다.
+
 ## 1. 코드와 Docker 확인
 
 ```bash
@@ -35,6 +38,9 @@ LOG_DIR=data/infaas/logs
 PUBLISH_ADDR=127.0.0.1
 PROFILE_MODE=original
 PROFILE_RUNS=30
+PREPROCESS_BACKEND=pil
+CPU_THREADS=2
+MODEL_REVISIONS=resnet-50:34c2154c194f829b11125337b98c8f5f9965ff19
 ```
 
 - `GPUS`: 사용할 호스트 GPU와 유형. 2번 한 장이면 `2:v100`.
@@ -43,7 +49,11 @@ PROFILE_RUNS=30
 - `PROFILE_MODE=original`: 원본 방식의 random tensor 추론 프로파일.
   `service`: `INPUT_IMAGE`의 디코딩·전처리를 포함한 실측. 모델 교체와 함께 선택하세요.
 - 현재 이 배포는 **batch 1 고정**입니다. `BATCH_SIZE`를 env에 추가해도 배치는 바뀌지 않습니다.
-- 모델 revision을 env로 고정하는 기능은 없습니다. 다른 포트와 체크포인트까지 일치시켜야 하는 비교는 별도 확인이 필요합니다.
+- `PREPROCESS_BACKEND=pil`: CPU PIL RGB + HF slow processor. GPU에는 전처리가 끝난 텐서를 전송합니다.
+- `CPU_THREADS=2`: PyTorch intra-op 설정. CPU pinning과는 다릅니다.
+- `MODEL_REVISIONS`: `모델이름:40자리커밋` 목록. 다운로드와 워커 로딩에 동일하게 적용됩니다.
+  ResNet-50 기본값은 Proteus와 같은 pinned revision입니다. 다른 모델은 원하는 revision을 명시하세요.
+- 새 worker ML 버전은 Proteus와 맞춥니다. 기존 이미지로 실행하지 말고 첫 사용 시 재빌드하세요.
 
 local.env는 자동 선택됩니다. 다른 전체 설정 파일은 `INFAAS_ENV=/절대경로/파일.env`로 선택합니다.
 
@@ -56,6 +66,7 @@ local.env는 자동 선택됩니다. 다른 전체 설정 파일은 `INFAAS_ENV=
 bash deploy/docker/infaas-docker.sh settings
 bash deploy/docker/infaas-docker.sh build
 bash deploy/docker/infaas-docker.sh download
+bash deploy/docker/infaas-docker.sh doctor
 bash deploy/docker/infaas-docker.sh up
 bash deploy/docker/infaas-docker.sh state
 bash deploy/docker/infaas-docker.sh register
@@ -84,6 +95,7 @@ bash deploy/docker/infaas-docker.sh query resnet-18 inputs/test-dog.jpg 200 -n 1
 |---|---|
 | 모델 | `download` → `up` → `register --reprofile` |
 | GPU·프로파일 방식·전처리 | `up` → `register --reprofile` |
+| DALI 사용 여부 | `INSTALL_DALI=1`로 설치 필요 시 `build`; backend 변경 뒤 재프로파일링 |
 | SLO·입력 | `query`에 적용. `PROFILE_MODE=service`에서 입력도 바꿨다면 재프로파일링 |
 | 코드·Dockerfile·라이브러리 버전 | `build` → `up` → `register --reprofile` |
 
@@ -98,6 +110,7 @@ bash deploy/docker/infaas-docker.sh query resnet-18 inputs/test-dog.jpg 200 -n 1
 - `path=inactive`, `load>0`: 모델 준비 비용이 포함된 요청.
 - `path=active`, `load=0`: 이미 GPU에 올라간 모델로 처리한 요청.
 - `e2e`: 요청 왕복 시간. `decide`: 컨트롤러 선택 시간. `OK`는 SLO 만족을 뜻하지 않습니다.
+- `dali=0`: 실제 PIL 경로. `slo=PASS/MISS`: 클라이언트 e2e 기준.
 - 상태와 로그는 `state`·`logs`, 저장 파일은 `PROFILE_DIR`·`LOG_DIR`에서 확인합니다.
 - 학습은 하지 않습니다. 이미지 반복 요청은 정확도 평가가 아닙니다.
 
