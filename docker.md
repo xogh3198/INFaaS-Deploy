@@ -1,3 +1,8 @@
+# 모델·GPU 설정 변경 및 빠른 실행
+
+필요 설정과 단계별 명령은 **[setting_readme.md](setting_readme.md)**를 참고하세요.
+기존 명령과 API 예시는 아래에 유지합니다.
+
 ### 1. 서버 GPU 확인
 
 ```

@@ -251,6 +251,7 @@ $RECYCLE.BIN/
 
 PLAN.md
 README.md
+!/README.md
 
 scripts/
 profiles/
@@ -258,3 +259,6 @@ bench/
 
 *.tar
 deploy/docker/generated/
+/deploy/docker/infaas-docker.local.env
+/data/
+/inputs/

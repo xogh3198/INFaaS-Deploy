@@ -17,6 +17,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="${INFAAS_ENV:-$HERE/infaas-docker.env}"
+if [[ -z "${INFAAS_ENV:-}" && -f "$HERE/infaas-docker.local.env" ]]; then
+  ENV_FILE="$HERE/infaas-docker.local.env"
+fi
+cd "$ROOT"
 OUT="$HERE/generated"
 COMPOSE=(docker compose -f "$OUT/docker-compose.yml")
 
@@ -41,6 +45,12 @@ gen() { python3 "$HERE/gen_compose.py" --env "$ENV_FILE" --out "$OUT" "$@"; }
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
+  settings)
+    printf 'Settings file: %s\n' "$ENV_FILE"
+    for key in GPUS HW_COST MODEL_NAME INPUT_IMAGE SLO_MS MODEL_DIR PROFILE_DIR LOG_DIR PROFILE_MODE; do
+      printf '%s=%s\n' "$key" "$(get "$key")"
+    done
+    echo 'BATCH_SIZE=1 (this deployment does not implement configurable batching)' ;;
   gpus)
     python3 "$HERE/gen_compose.py" --suggest ;;
   build)
@@ -48,9 +58,24 @@ case "$cmd" in
     docker build -f "$ROOT/docker/worker.Dockerfile" -t "$WORKER_IMAGE" "$ROOT" ;;
   download)
     MODEL_DIR="$(get MODEL_DIR /data/podexec-models)"
-    mkdir -p "$MODEL_DIR" 2>/dev/null || true
+    MODEL_DIR="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$MODEL_DIR")"
+    mkdir -p "$MODEL_DIR"
+    download_args=(); selected=0; all_models=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --all) all_models=1; shift ;;
+        --models|--models=*) selected=1; download_args+=("$1"); shift ;;
+        *) download_args+=("$1"); shift ;;
+      esac
+    done
+    if [[ "$all_models" -eq 1 && "$selected" -eq 1 ]]; then
+      echo 'Choose --all or --models, not both.' >&2; exit 1
+    fi
+    if [[ "$all_models" -eq 0 && "$selected" -eq 0 ]]; then
+      download_args=(--models "$(get MODEL_NAME resnet-50)" "${download_args[@]}")
+    fi
     docker run --rm -v "$MODEL_DIR:/models" -e HF_HOME=/models -e HF_HUB_OFFLINE=0 \
-      "$WORKER_IMAGE" python -m infaas.cli.download_models "$@" ;;
+      "$WORKER_IMAGE" python -m infaas.cli.download_models "${download_args[@]}" ;;
   gen)
     gen "$@" ;;
   up)
@@ -58,12 +83,24 @@ case "$cmd" in
     "${COMPOSE[@]}" up -d --remove-orphans
     echo ">> waiting for workers to report healthy (library preload takes a while)..."
     for _ in $(seq 1 90); do
-      total=$("${COMPOSE[@]}" ps --format '{{.Name}}' | grep -c -- '-worker-' || true)
-      ok=$("${COMPOSE[@]}" ps --format '{{.Name}} {{.Health}}' | grep -- '-worker-' | grep -c ' healthy' || true)
+      total=0; ok=0
+      while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        row=$(docker inspect --format '{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id")
+        if [[ "$row" == *-worker-* ]]; then
+          total=$((total + 1))
+          if [[ "$row" == *' healthy' ]]; then ok=$((ok + 1)); fi
+        fi
+      done < <("${COMPOSE[@]}" ps --all --quiet)
       echo "   workers healthy: $ok/$total"
       [ "$total" -gt 0 ] && [ "$ok" -eq "$total" ] && break
       sleep 5
     done
+    if [[ "$total" -eq 0 || "$ok" -ne "$total" ]]; then
+      echo 'ERROR: workers did not become healthy; inspect logs/state.' >&2
+      "${COMPOSE[@]}" ps
+      exit 1
+    fi
     "${COMPOSE[@]}" ps ;;
   down)
     "${COMPOSE[@]}" down --remove-orphans ;;
@@ -83,11 +120,26 @@ case "$cmd" in
         *) args+=("$1"); shift ;;
       esac
     done
-    [ ${#args[@]} -gt 0 ] || args=(--all)
+    selected=0
+    for option in "${args[@]}"; do
+      case "$option" in --all|--models|--models=*|--import-dir|--import-dir=*) selected=1 ;; esac
+    done
+    if [[ "$selected" -eq 0 ]]; then args=(--models "$(get MODEL_NAME resnet-50)" "${args[@]}"); fi
+    if [[ ${#img_arg[@]} -eq 0 && "$(get PROFILE_MODE original)" == service ]]; then
+      image="$(get INPUT_IMAGE inputs/test-dog.jpg)"
+      [[ -f "$image" ]] || { echo "Input missing: $image" >&2; exit 1; }
+      vol=(-v "$(realpath "$image"):/in/image.jpg:ro"); img_arg=(--image /in/image.jpg)
+    fi
     docker run --rm "${NET_ARGS[@]}" "${vol[@]}" "$CONTROLLER_IMAGE" \
       python -m infaas.cli.register --controller "$CTRL:50053" "${img_arg[@]}" "${args[@]}" ;;
   query)
-    model="${1:?usage: query MODEL IMAGE SLO_MS [-n N]}"; img="${2:?image}"; slo="${3:?slo_ms}"; shift 3
+    if [[ $# -gt 0 && "$1" != -* ]]; then
+      [[ $# -ge 3 ]] || { echo 'Usage: query [MODEL IMAGE SLO_MS] [-n N]' >&2; exit 1; }
+      model="$1"; img="$2"; slo="$3"; shift 3
+    else
+      model="$(get MODEL_NAME resnet-50)"; img="$(get INPUT_IMAGE inputs/test-dog.jpg)"; slo="$(get SLO_MS 200)"
+    fi
+    [[ -f "$img" ]] || { echo "Input missing: $img" >&2; exit 1; }
     docker run --rm "${NET_ARGS[@]}" -v "$(realpath "$img"):/in/image.jpg:ro" "$CONTROLLER_IMAGE" \
       python -m infaas.cli.online_query --controller "$CTRL:50052" \
       --model "$model" --image /in/image.jpg --slo "$slo" "$@" ;;

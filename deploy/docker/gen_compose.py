@@ -34,7 +34,7 @@ DEPLOY_KEYS = {
     "GPUS", "HW_TYPES", "HW_COST", "PREPROCESS_MODES", "CPUSETS", "MODEL_DIR", "PROFILE_DIR",
     "LOG_DIR", "CONTROLLER_IMAGE", "WORKER_IMAGE", "NETWORK", "PUBLISH_ADDR",
     "WORKER_BASE_PORT", "ROLE", "CONTROLLER_HOST", "ADVERTISE_HOST", "EXTRA_WORKERS",
-    "WORKER_PREFIX", "HOST_PORT_OFFSET",
+    "WORKER_PREFIX", "HOST_PORT_OFFSET", "MODEL_NAME", "INPUT_IMAGE", "SLO_MS",
 }
 # keys this script sets per service or derives; the env file must not set them
 RESERVED = {
@@ -64,7 +64,7 @@ class Gpu:
 # ------------------------------------------------------------ reading
 def read_env(path: Path) -> Dict[str, str]:
     out: Dict[str, str] = {}
-    for n, line in enumerate(path.read_text().splitlines(), 1):
+    for n, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -195,6 +195,14 @@ def esc(v) -> str:
 
 
 def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
+    # Compose is generated in deploy/docker/generated, NOT the repository root.
+    # Resolve relative user paths before handing them to Docker Compose.
+    cfg = dict(cfg)
+    for key in ("MODEL_DIR", "PROFILE_DIR", "LOG_DIR"):
+        value = cfg.get(key, "")
+        path = Path(value).expanduser()
+        if value and not path.is_absolute() and not value.startswith("/"):
+            cfg[key] = str((HERE.parents[1] / path).resolve())
     clash = sorted(RESERVED & set(cfg))
     if clash:
         raise ConfigError(f"set by gen_compose.py, remove from the env file: {clash}")
