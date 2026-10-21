@@ -48,9 +48,10 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   settings)
     printf 'Settings file: %s\n' "$ENV_FILE"
-    for key in GPUS HW_COST MODEL_NAME MODEL_REVISIONS INPUT_IMAGE SLO_MS MODEL_DIR PROFILE_DIR LOG_DIR PROFILE_MODE PREPROCESS_BACKEND CPU_THREADS CPU_INTEROP_THREADS PREPROCESS_WORKERS TORCH_VERSION TORCHVISION_VERSION INSTALL_DALI; do
+    for key in GPUS HW_COST MODEL_NAME MODEL_REVISIONS INPUT_IMAGE SLO_MS MODEL_DIR PROFILE_DIR LOG_DIR PROFILE_MODE PREPROCESS_BACKEND CPU_THREADS CPU_INTEROP_THREADS TORCH_VERSION TORCHVISION_VERSION INSTALL_DALI; do
       printf '%s=%s\n' "$key" "$(get "$key")"
     done
+    echo 'PREPROCESS_EXECUTOR=request-handler (no separate preprocessing pool)'
     echo 'BATCH_SIZE=1 (this deployment does not implement configurable batching)' ;;
   gpus)
     python3 "$HERE/gen_compose.py" --suggest ;;

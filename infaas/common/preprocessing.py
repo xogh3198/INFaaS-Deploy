@@ -67,7 +67,7 @@ def fingerprint(model_id: str, hardware: str = "") -> dict:
     return {
         "schema": "infaas-preprocessing-v1", "backend": selected,
         "pipeline": "cpu-ready-v1" if selected == "pil" else "legacy-dali",
-        "preprocess_workers": int(os.environ.get("PREPROCESS_WORKERS", "1")),
+        "preprocess_executor": "request-handler",
         "cpu_interop_threads": int(os.environ.get("CPU_INTEROP_THREADS", "1")),
         "dali_mode": None if selected == "pil" else modes.get(hw, "cpu_decode_gpu"),
         "cpu_threads": cpu_threads(), "processor_use_fast": False,

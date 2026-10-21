@@ -35,7 +35,7 @@ DEPLOY_KEYS = {
     "LOG_DIR", "CONTROLLER_IMAGE", "WORKER_IMAGE", "NETWORK", "PUBLISH_ADDR",
     "WORKER_BASE_PORT", "ROLE", "CONTROLLER_HOST", "ADVERTISE_HOST", "EXTRA_WORKERS",
     "WORKER_PREFIX", "HOST_PORT_OFFSET", "MODEL_NAME", "INPUT_IMAGE", "SLO_MS",
-    "PYTHON_IMAGE", "INSTALL_DALI",
+    "PYTHON_IMAGE", "INSTALL_DALI", "PREPROCESS_WORKERS",
 }
 # keys this script sets per service or derives; the env file must not set them
 RESERVED = {
@@ -218,7 +218,9 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
         raise ConfigError("CPU_THREADS must be a positive integer") from exc
     if cpu_threads < 1:
         raise ConfigError("CPU_THREADS must be a positive integer")
-    for key, default, limit in (("PREPROCESS_WORKERS", "1", 32), ("CPU_INTEROP_THREADS", "1", 128)):
+    if "PREPROCESS_WORKERS" in cfg:
+        print("NOTICE: INFaaS ignores PREPROCESS_WORKERS; preprocessing stays on request handlers.", file=sys.stderr)
+    for key, default, limit in (("CPU_INTEROP_THREADS", "1", 128),):
         try:
             value = int(cfg.get(key, default))
         except ValueError as exc:
@@ -297,7 +299,7 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
             "environment": {
                 "WORKER_NAME": name, "GPU_TYPE": g.hw, "WORKER_PORT": str(port),
                 "PREPROCESS_BACKEND": backend, "CPU_THREADS": str(cpu_threads),
-                "PREPROCESS_WORKERS": cfg["PREPROCESS_WORKERS"], "CPU_INTEROP_THREADS": cfg["CPU_INTEROP_THREADS"],
+                "CPU_INTEROP_THREADS": cfg["CPU_INTEROP_THREADS"],
                 "PREPROCESS_MODE": modes.get(g.hw, "cpu_decode_gpu"),
                 "REDIS_HOST": redis_host, "REDIS_PORT": str(REDIS_PORT),
                 "CONTROLLER_ADDR": f"{ctrl_host}:{PORTS['placement']}",
@@ -385,7 +387,7 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
         "WORKER_MODE": "static",
         "STATIC_WORKERS": ",".join(f"{n}={hw}@{a}" for n, hw, a in workers),
         "PREPROCESS_BACKEND": backend, "CPU_THREADS": str(cpu_threads),
-        "PREPROCESS_WORKERS": cfg["PREPROCESS_WORKERS"], "CPU_INTEROP_THREADS": cfg["CPU_INTEROP_THREADS"],
+        "CPU_INTEROP_THREADS": cfg["CPU_INTEROP_THREADS"],
         "PREPROCESS_MODES": cfg.get("PREPROCESS_MODES", ""),
         "PROFILE_REQUIRE_PREPROCESS_MATCH": cfg.get("PROFILE_REQUIRE_PREPROCESS_MATCH", "true"),
         "TORCH_VERSION": cfg.get("TORCH_VERSION", "2.11.0+cu126"),

@@ -37,12 +37,14 @@ def test_comparison_preset_and_shared_worker_controller_contract():
     assert worker["deploy"]["resources"]["reservations"]["devices"][0]["device_ids"] == ["2"]
     assert cfg["MODEL_REVISIONS"] == "resnet-50:" + preprocessing.RESNET50_REVISION
     assert env["PROFILE_REQUIRE_PREPROCESS_MATCH"] == "true"
-    assert env["PROFILE_MODE"] == "original"
-    assert env["PREPROCESS_WORKERS"] == "1"
+    assert env["PROFILE_MODE"] == "service"
+    assert "PREPROCESS_WORKERS" not in env
+    assert "PREPROCESS_WORKERS" not in worker["environment"]
     assert env["CPU_INTEROP_THREADS"] == "1"
+    assert env["FRONTEND_THREADS"] == "64" and env["WORKER_THREADS"] == "32"
     assert env["WARMUP_QUERIES"] == "10"
-    assert "cpu-ready-v1/profiles" in cfg["PROFILE_DIR"]
-    assert "cpu-ready-v1/logs" in cfg["LOG_DIR"]
+    assert "preserved-settings-v1/profiles" in cfg["PROFILE_DIR"]
+    assert "preserved-settings-v1/logs" in cfg["LOG_DIR"]
     assert cfg["WORKER_IMAGE"] != "infaas-worker:0.1.0"
     assert cfg["DECISION_MODE"] == "6" and cfg["MODEL_AUTOSCALER_INTERVAL_S"] == "1.0"
 
@@ -203,7 +205,6 @@ def test_cpu_preprocess_uses_rgb_image_list_before_forward(monkeypatch):
     processor = Mock(return_value={"pixel_values": tensor})
     inst = runtime.Instance.__new__(runtime.Instance)
     inst.dali_cfg, inst.processor, inst.model = None, processor, object()
-    inst.cpu_pool = None
     inst._forward = Mock(side_effect=lambda inputs: (object(), runtime.time.perf_counter(), runtime.time.perf_counter()))
     monkeypatch.setattr(runtime, "_decode", lambda *args: ("Samoyed", []))
     buf = io.BytesIO()
@@ -237,7 +238,7 @@ def test_docker_pins_and_build_download_doctor_contract():
         assert entry in ignore.splitlines()
 
 
-def test_cpu_pool_prepares_next_tensor_while_previous_forward_is_blocked(monkeypatch):
+def test_existing_request_handlers_prepare_without_a_new_cpu_pool(monkeypatch):
     runtime, _, _ = load_mock_runtime(monkeypatch)
     inst = runtime.Instance.__new__(runtime.Instance)
     tensor = SimpleNamespace(device=SimpleNamespace(type="cpu"))
@@ -262,9 +263,7 @@ def test_cpu_pool_prepares_next_tensor_while_previous_forward_is_blocked(monkeyp
     monkeypatch.setattr(runtime, "_decode", lambda *args: ("Samoyed", []))
     buf = io.BytesIO()
     Image.new("RGB", (25, 19)).save(buf, format="JPEG")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="test-cpu") as cpu, \
-            concurrent.futures.ThreadPoolExecutor(max_workers=2) as rpc:
-        inst.cpu_pool = cpu
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="test-rpc") as rpc:
         first = rpc.submit(inst._infer, buf.getvalue())
         try:
             assert gpu_started.wait(3)
@@ -275,7 +274,42 @@ def test_cpu_pool_prepares_next_tensor_while_previous_forward_is_blocked(monkeyp
         for future in (first, second):
             timings = future.result(3)[3]
             assert all(k in timings for k in ("cpu_queue", "cpu_service", "ready_queue", "gpu_service"))
-    assert all(name.startswith("test-cpu") for name in calls)
+    assert all(name.startswith("test-rpc") for name in calls)
+    assert not hasattr(inst, "cpu_pool")
+
+
+def test_old_pool_setting_is_not_forwarded_or_applied():
+    cfg = {"GPUS": "2:v100", "HW_COST": "v100:1", "PREPROCESS_WORKERS": "1"}
+    document, env, _, _ = compose.build(cfg, SMI)
+    assert "PREPROCESS_WORKERS" not in env
+    assert "PREPROCESS_WORKERS" not in document["services"]["infaas-worker-2"]["environment"]
+    assert preprocessing.fingerprint("microsoft/resnet-50")["preprocess_executor"] == "request-handler"
+
+
+def test_two_request_handlers_can_preprocess_concurrently(monkeypatch):
+    runtime, _, _ = load_mock_runtime(monkeypatch)
+    monkeypatch.setenv("PREPROCESS_WORKERS", "1")  # Obsolete setting cannot serialize INFaaS.
+    barrier = threading.Barrier(2)
+    tensor = SimpleNamespace(device=SimpleNamespace(type="cpu"))
+    calls = []
+
+    def processor(**kwargs):
+        calls.append(threading.current_thread().name)
+        barrier.wait(timeout=3)
+        return {"pixel_values": tensor}
+
+    inst = runtime.Instance.__new__(runtime.Instance)
+    inst.dali_cfg, inst.processor, inst.model = None, processor, object()
+    inst._forward = lambda inputs: (object(), runtime.time.perf_counter(), runtime.time.perf_counter())
+    monkeypatch.setattr(runtime, "_decode", lambda *args: ("Samoyed", []))
+    buf = io.BytesIO()
+    Image.new("RGB", (25, 19)).save(buf, format="JPEG")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="request-handler") as rpc:
+        futures = [rpc.submit(inst._infer, buf.getvalue()) for _ in range(2)]
+        for future in futures:
+            assert future.result(4)[0] == "Samoyed"
+    assert len(set(calls)) == 2
+    assert not hasattr(runtime.Runtime("v100"), "cpu_pool")
 
 
 def test_cpu_guide_links_and_keeps_policy_scope_explicit():
