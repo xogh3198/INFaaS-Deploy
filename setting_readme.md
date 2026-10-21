@@ -2,6 +2,9 @@
 
 저장소 루트에서 실행합니다. 사전 학습 가중치로 실제 GPU 추론을 수행합니다.
 
+CPU 전처리 → 텐서 큐 → GPU 실행 정렬 및 프로파일 범위 변경은
+[CPU_READY_PIPELINE.md](CPU_READY_PIPELINE.md)를 먼저 확인하세요.
+
 **Proteus와 전처리를 통일하는 V100·ResNet-50 실험은 [CPU_PREPROCESSING.md](CPU_PREPROCESSING.md)**에
 별도 전체 env와 재실행 명령을 정리했습니다. 기존 DALI 결과는 보존합니다.
 

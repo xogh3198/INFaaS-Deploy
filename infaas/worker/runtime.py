@@ -24,6 +24,7 @@ import io
 import logging
 import os
 import queue
+import concurrent.futures
 import threading
 import time
 from typing import Dict, List, Optional, Tuple
@@ -78,13 +79,14 @@ class Instance:
     """A loaded model-variant on this worker's GPU."""
 
     def __init__(self, variant: str, model_id: str, model, processor,
-                 dali_cfg, dali_note: str) -> None:
+                 dali_cfg, dali_note: str, cpu_pool=None) -> None:
         self.variant = variant
         self.model_id = model_id
         self.model = model
         self.processor = processor
         self.dali_cfg = dali_cfg
         self.dali_note = dali_note
+        self.cpu_pool = cpu_pool
         self.lock = threading.Lock()          # held while a forward pass runs
         self.stream = torch.cuda.Stream() if DEVICE == "cuda" else None
         self._inflight = 0
@@ -164,11 +166,33 @@ class Instance:
 
     def _infer(self, image_bytes: bytes):
         t0 = time.perf_counter()
+        if self.cpu_pool is not None and self.dali_cfg is None:
+            inputs, img_size, cpu_started, t_decode, t_pre, _ = self.cpu_pool.submit(
+                self.prepare, image_bytes).result()
+            pre_wait = (cpu_started - t0) * 1000
+        else:
+            inputs, img_size, cpu_started, t_decode, t_pre, pre_wait = self.prepare(image_bytes)
+        out, t_locked, t_fwd = self._forward(inputs)
+        label, boxes = _decode(out, self.model, self.processor, img_size)
+        t_end = time.perf_counter()
+        ms = lambda a, b: (b - a) * 1000.0
+        timings = {"decode": ms(cpu_started, t_decode), "preprocess": ms(t_decode, t_pre),
+            "pre_wait": pre_wait, "cpu_queue": pre_wait, "cpu_service": ms(cpu_started, t_pre),
+            "ready_queue": ms(t_pre, t_locked), "lock_wait": ms(t_pre, t_locked),
+            "forward": ms(t_locked, t_fwd), "postprocess": ms(t_fwd, t_end),
+            "gpu_service": ms(t_locked, t_fwd), "total": ms(t0, t_end),
+            "dali": float(self.dali_cfg is not None)}
+        return label, boxes, img_size, timings
+
+    def prepare(self, image_bytes):
+        """CPU-only in the PIL comparison path, before the GPU execution queue."""
+        cpu_started = time.perf_counter()
+        dali_wait = 0.0
         if self.dali_cfg is not None:
             with Image.open(io.BytesIO(image_bytes)) as im:
                 img_size = im.size
             t_decode = time.perf_counter()
-            pixel_values, pre_wait = dali_preprocess.run_timed(self.dali_cfg, image_bytes)
+            pixel_values, dali_wait = dali_preprocess.run_timed(self.dali_cfg, image_bytes)
             inputs = {"pixel_values": pixel_values}
         else:
             with Image.open(io.BytesIO(image_bytes)) as source:
@@ -179,23 +203,9 @@ class Instance:
             inputs = dict(self.processor(images=[img], return_tensors="pt"))
             if any(value.device.type != "cpu" for value in inputs.values()):
                 raise RuntimeError("PIL preprocessing must produce CPU tensors before H2D")
-            pre_wait = 0.0
         t_pre = time.perf_counter()
-        out, t_locked, t_fwd = self._forward(inputs)
-        label, boxes = _decode(out, self.model, self.processor, img_size)
-        t_end = time.perf_counter()
-        ms = lambda a, b: (b - a) * 1000.0  # noqa: E731
-        timings = {
-            "decode": ms(t0, t_decode),
-            "preprocess": ms(t_decode, t_pre),
-            "pre_wait": pre_wait,
-            "lock_wait": ms(t_pre, t_locked),
-            "forward": ms(t_locked, t_fwd),
-            "postprocess": ms(t_fwd, t_end),
-            "total": ms(t0, t_end),
-            "dali": 1.0 if self.dali_cfg is not None else 0.0,
-        }
-        return label, boxes, img_size, timings
+        # DALI wait is retained for the optional legacy path, not CPU comparison.
+        return inputs, img_size, cpu_started, t_decode, t_pre, dali_wait
 
 
 class Runtime:
@@ -206,6 +216,14 @@ class Runtime:
         if os.environ.get("REQUIRE_CUDA", "false").lower() in {"1", "true", "yes"} and DEVICE != "cuda":
             raise RuntimeError("CUDA unavailable; comparison CPU-inference fallback is forbidden")
         torch.set_num_threads(preprocessing.cpu_threads())
+        interop = int(os.environ.get("CPU_INTEROP_THREADS", "1"))
+        if torch.get_num_interop_threads() != interop:
+            torch.set_num_interop_threads(interop)
+        workers = int(os.environ.get("PREPROCESS_WORKERS", "1"))
+        if not 1 <= workers <= 32:
+            raise ValueError("PREPROCESS_WORKERS must be in 1..32")
+        self.cpu_pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers,
+                                                             thread_name_prefix="infaas-cpu-preprocess")
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
@@ -297,7 +315,7 @@ class Runtime:
         if self._probe is not None:
             dali_cfg, note = dali_preprocess.evaluate(model_id, processor, *self._probe)
             note = ("DALI " if dali_cfg is not None else "PIL: ") + note
-        inst = Instance(variant, model_id, model, processor, dali_cfg, note)
+        inst = Instance(variant, model_id, model, processor, dali_cfg, note, self.cpu_pool)
         # ready to run, before the warmup queries: the original profiler's load
         # latency stops here (copy -> MODEL_READY, [C profile_model.sh:254-266])
         inst.ready_ms = (time.perf_counter() - t0) * 1000.0
@@ -323,3 +341,6 @@ class Runtime:
             torch.cuda.empty_cache()
         log.info("unloaded %s", variant)
         return True
+
+    def close(self):
+        self.cpu_pool.shutdown(wait=True)

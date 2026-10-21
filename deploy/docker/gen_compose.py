@@ -218,6 +218,14 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
         raise ConfigError("CPU_THREADS must be a positive integer") from exc
     if cpu_threads < 1:
         raise ConfigError("CPU_THREADS must be a positive integer")
+    for key, default, limit in (("PREPROCESS_WORKERS", "1", 32), ("CPU_INTEROP_THREADS", "1", 128)):
+        try:
+            value = int(cfg.get(key, default))
+        except ValueError as exc:
+            raise ConfigError(f"{key} must be a positive integer") from exc
+        if not 1 <= value <= limit:
+            raise ConfigError(f"{key} must be in 1..{limit}")
+        cfg[key] = str(value)
 
     role = cfg.get("ROLE", "all").lower()
     network = cfg.get("NETWORK", "bridge").lower()
@@ -289,6 +297,7 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
             "environment": {
                 "WORKER_NAME": name, "GPU_TYPE": g.hw, "WORKER_PORT": str(port),
                 "PREPROCESS_BACKEND": backend, "CPU_THREADS": str(cpu_threads),
+                "PREPROCESS_WORKERS": cfg["PREPROCESS_WORKERS"], "CPU_INTEROP_THREADS": cfg["CPU_INTEROP_THREADS"],
                 "PREPROCESS_MODE": modes.get(g.hw, "cpu_decode_gpu"),
                 "REDIS_HOST": redis_host, "REDIS_PORT": str(REDIS_PORT),
                 "CONTROLLER_ADDR": f"{ctrl_host}:{PORTS['placement']}",
@@ -376,6 +385,7 @@ def build(cfg: Dict[str, str], smi: Optional[List[dict]], verify: bool = True):
         "WORKER_MODE": "static",
         "STATIC_WORKERS": ",".join(f"{n}={hw}@{a}" for n, hw, a in workers),
         "PREPROCESS_BACKEND": backend, "CPU_THREADS": str(cpu_threads),
+        "PREPROCESS_WORKERS": cfg["PREPROCESS_WORKERS"], "CPU_INTEROP_THREADS": cfg["CPU_INTEROP_THREADS"],
         "PREPROCESS_MODES": cfg.get("PREPROCESS_MODES", ""),
         "PROFILE_REQUIRE_PREPROCESS_MATCH": cfg.get("PROFILE_REQUIRE_PREPROCESS_MATCH", "true"),
         "TORCH_VERSION": cfg.get("TORCH_VERSION", "2.11.0+cu126"),

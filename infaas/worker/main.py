@@ -57,7 +57,10 @@ def serve() -> None:
     for svc in ("", "infaas.internal.Query"):
         hs.set(svc, health_pb2.HealthCheckResponse.SERVING)
     log.info("worker READY on :%d (gpu %s)", config.WORKER_PORT, monitor.gpu.name)
-    server.wait_for_termination()
+    try:
+        server.wait_for_termination()
+    finally:
+        runtime.close()
 
 
 if __name__ == "__main__":

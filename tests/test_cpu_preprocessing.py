@@ -7,6 +7,8 @@ import importlib.util
 import io
 import json
 import sys
+import threading
+import concurrent.futures
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -35,10 +37,12 @@ def test_comparison_preset_and_shared_worker_controller_contract():
     assert worker["deploy"]["resources"]["reservations"]["devices"][0]["device_ids"] == ["2"]
     assert cfg["MODEL_REVISIONS"] == "resnet-50:" + preprocessing.RESNET50_REVISION
     assert env["PROFILE_REQUIRE_PREPROCESS_MATCH"] == "true"
-    assert env["PROFILE_MODE"] == "service"
+    assert env["PROFILE_MODE"] == "original"
+    assert env["PREPROCESS_WORKERS"] == "1"
+    assert env["CPU_INTEROP_THREADS"] == "1"
     assert env["WARMUP_QUERIES"] == "10"
-    assert "proteus-cpu/profiles" in cfg["PROFILE_DIR"]
-    assert "proteus-cpu/logs" in cfg["LOG_DIR"]
+    assert "cpu-ready-v1/profiles" in cfg["PROFILE_DIR"]
+    assert "cpu-ready-v1/logs" in cfg["LOG_DIR"]
     assert cfg["WORKER_IMAGE"] != "infaas-worker:0.1.0"
     assert cfg["DECISION_MODE"] == "6" and cfg["MODEL_AUTOSCALER_INTERVAL_S"] == "1.0"
 
@@ -128,6 +132,7 @@ def test_dali_mode_changes_invalidate_profiles(monkeypatch):
 def load_mock_runtime(monkeypatch):
     fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True, Stream=Mock()),
         set_num_threads=Mock(), get_num_threads=lambda: 2,
+        get_num_interop_threads=lambda: 1, set_num_interop_threads=Mock(),
         backends=SimpleNamespace(cudnn=SimpleNamespace(benchmark=True, allow_tf32=True),
                                 cuda=SimpleNamespace(matmul=SimpleNamespace(allow_tf32=True))))
     dali = SimpleNamespace(available=Mock(return_value=False), status=lambda: "mock-dali")
@@ -198,6 +203,7 @@ def test_cpu_preprocess_uses_rgb_image_list_before_forward(monkeypatch):
     processor = Mock(return_value={"pixel_values": tensor})
     inst = runtime.Instance.__new__(runtime.Instance)
     inst.dali_cfg, inst.processor, inst.model = None, processor, object()
+    inst.cpu_pool = None
     inst._forward = Mock(side_effect=lambda inputs: (object(), runtime.time.perf_counter(), runtime.time.perf_counter()))
     monkeypatch.setattr(runtime, "_decode", lambda *args: ("Samoyed", []))
     buf = io.BytesIO()
@@ -229,6 +235,47 @@ def test_docker_pins_and_build_download_doctor_contract():
     ignore = (ROOT / ".dockerignore").read_text()
     for entry in ("data", "inputs", "deploy/docker/*.local.env", ".git"):
         assert entry in ignore.splitlines()
+
+
+def test_cpu_pool_prepares_next_tensor_while_previous_forward_is_blocked(monkeypatch):
+    runtime, _, _ = load_mock_runtime(monkeypatch)
+    inst = runtime.Instance.__new__(runtime.Instance)
+    tensor = SimpleNamespace(device=SimpleNamespace(type="cpu"))
+    gpu_started, release_gpu, second_ready = (threading.Event() for _ in range(3))
+    calls = []
+
+    def processor(**kwargs):
+        calls.append(threading.current_thread().name)
+        if len(calls) == 2:
+            second_ready.set()
+        return {"pixel_values": tensor}
+
+    def forward(inputs):
+        assert inputs == {"pixel_values": tensor}
+        gpu_started.set()
+        assert release_gpu.wait(3)
+        now = runtime.time.perf_counter()
+        return object(), now, now
+
+    inst.dali_cfg, inst.processor, inst.model = None, processor, object()
+    inst._forward = forward
+    monkeypatch.setattr(runtime, "_decode", lambda *args: ("Samoyed", []))
+    buf = io.BytesIO()
+    Image.new("RGB", (25, 19)).save(buf, format="JPEG")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="test-cpu") as cpu, \
+            concurrent.futures.ThreadPoolExecutor(max_workers=2) as rpc:
+        inst.cpu_pool = cpu
+        first = rpc.submit(inst._infer, buf.getvalue())
+        try:
+            assert gpu_started.wait(3)
+            second = rpc.submit(inst._infer, buf.getvalue())
+            assert second_ready.wait(3), "CPU preparation blocked behind GPU work"
+        finally:
+            release_gpu.set()
+        for future in (first, second):
+            timings = future.result(3)[3]
+            assert all(k in timings for k in ("cpu_queue", "cpu_service", "ready_queue", "gpu_service"))
+    assert all(name.startswith("test-cpu") for name in calls)
 
 
 def test_cpu_guide_links_and_keeps_policy_scope_explicit():

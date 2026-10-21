@@ -13,11 +13,14 @@
 | 요청 입력·SLO | 기존 `inputs/test-dog.jpg`, 200ms |
 | 전처리 | CPU PIL 디코딩·RGB → HF AutoImageProcessor `use_fast=False` → CPU 텐서 |
 | 추론 | CPU 텐서 H2D → GPU forward. CPU 추론 대체 금지 |
-| CPU 스레드 | PyTorch intra-op 2. CPU 코어 독점/서비스 전체 스레드 제한은 아님 |
+| CPU 스레드 | intra-op 2, inter-op 1, 전처리 작업자 1. CPU 코어 독점은 아님 |
 | ML 버전 | Python 3.11, Torch 2.11.0+cu126, torchvision 0.26.0+cu126, CUDA 12.6 |
 | 전처리 라이브러리 | Transformers 5.19.0, Pillow 12.1.1, NumPy 2.2.6 |
 | 모델 준비 | WARMUP_QUERIES=10, TF32·cuDNN benchmark 비활성 |
-| 프로파일 | `PROFILE_MODE=service`: 실제 JPEG의 전처리 포함, 평균 지연·포화 QPS 측정 |
+| 프로파일 | `PROFILE_MODE=original`: 준비된 텐서의 H2D·forward, 전처리 제외. 평균 지연·포화 QPS |
+
+CPU 전처리 → 준비된 CPU 텐서 큐 → GPU 실행 구조입니다. 최초 SLO는 전처리 중에도 흐릅니다.
+새 버전 갱신 절차는 [CPU_READY_PIPELINE.md](CPU_READY_PIPELINE.md)를 확인하세요.
 
 Proteus의 배치별 p50 프로파일과 INFaaS의 평균/포화 QPS 프로파일은 정책이 요구하는
 통계가 달라 그대로 유지합니다. 프로파일 알고리즘·콜드 준비 절차까지 동일해진 것은 아닙니다.
@@ -87,7 +90,7 @@ sha256sum inputs/test-dog.jpg
 - `doctor`: `ok: true`, V100, CUDA 12.6, CPU 텐서, `cpu_threads: 2`, pinned revision/ML 버전 확인.
   processor/cache/CUDA 검사이며 모델 추론 성공을 대신하지 않습니다.
 - 워커 로그: `PIL RGB + HF slow AutoImageProcessor (CPU)`, 모델 로딩 `[PIL]`.
-- 새 프로파일: `profile_mode: service`, `dali: false`, `preprocessing_config` 기록.
+- 새 프로파일: `profile_mode: original`, `dali: false`, `preprocessing_config` 기록.
 - 첫 요청: `path=inactive`, `load>0`이면 cold. 이미 active면 cold로 보고하지 않습니다.
 - 이후 요청: `path=active`, `load=0`, 같은 분류 결과. `dali=0`이면 실제 PIL 경로.
 - `OK`는 요청 처리 성공, `slo=PASS/MISS`는 **클라이언트 e2e 기준** SLO 판정입니다.
