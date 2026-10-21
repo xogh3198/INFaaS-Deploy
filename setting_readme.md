@@ -11,7 +11,7 @@ CPU 전처리 → 텐서 큐 → GPU 실행 정렬 및 프로파일 범위 변�
 ## 1. 코드와 Docker 확인
 
 ```bash
-git clone --branch docker/v2 --single-branch https://github.com/xogh3198/INFaaS-Deploy.git infaas_deploy
+git clone --branch docker/v4 --single-branch https://github.com/xogh3198/INFaaS-Deploy.git infaas_deploy
 cd infaas_deploy
 docker info --format '{{.DockerRootDir}}'
 bash deploy/docker/infaas-docker.sh gpus

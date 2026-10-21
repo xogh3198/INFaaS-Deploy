@@ -1,6 +1,6 @@
 # Proteus와 동일한 CPU 전처리로 INFaaS 재실험
 
-`docker/v2`에서 실행합니다. **전처리·ML 버전을 맞추되 INFaaS의 요청 분배,
+`docker/v4`에서 실행합니다. **전처리·ML 버전을 맞추되 INFaaS의 요청 분배,
 워커 실행 구조, 모델/VM autoscaler와 batch 1은 유지**합니다. Proteus 서비스에 요청을 보내지 않습니다.
 
 ## 1. 통일한 조건
@@ -33,9 +33,8 @@ Proteus의 배치별 p50 프로파일과 INFaaS의 평균/포화 QPS 프로파�
 ```bash
 cd /home/xsailor4/taeho/infaas_deploy
 git status --short
-git fetch origin
-git checkout docker/v2
-git pull --ff-only origin docker/v2
+git fetch origin refs/heads/docker/v4
+git checkout -b docker/v4 FETCH_HEAD
 docker info --format '{{.DockerRootDir}}'
 nvidia-smi -i 2
 ```
@@ -48,6 +47,7 @@ bash deploy/docker/infaas-docker.sh down
 ```
 
 위 명령은 기존 generated Compose 파일이 있을 때 실행합니다. 모델/결과 디렉터리는 삭제하지 않습니다.
+이미 `docker/v4` 브랜치를 만든 경우 코드 갱신은 `git pull --ff-only origin docker/v4`를 사용합니다.
 
 ```bash
 cp -n deploy/docker/infaas-proteus-cpu.env deploy/docker/infaas-proteus-cpu.local.env

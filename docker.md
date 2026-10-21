@@ -4,7 +4,7 @@
 기존 명령과 API 예시는 아래에 유지합니다.
 
 Proteus와 동일한 CPU 전처리·버전으로 재실험할 때는 **[CPU_PREPROCESSING.md](CPU_PREPROCESSING.md)**를
-따릅니다. 새 `docker/v2` worker는 CPU 전처리가 기본이며 DALI는 선택 설치입니다.
+따릅니다. `docker/v4` worker는 CPU 전처리가 기본이며 DALI는 선택 설치입니다.
 
 ### 1. 서버 GPU 확인
 

@@ -1,6 +1,7 @@
 # CPU 전처리 → 텐서 큐 → GPU 실행
 
-배포 브랜치: `docker/cpu-ready-v1` (`docker/v2`에서 분기, main 변경 없음).
+배포 브랜치: `docker/v4` (`docker/v2`에서 분기, main 변경 없음).
+세 저장소의 전처리 분리 버전은 `docker/v4`로 통일했습니다. 이전 `docker/cpu-ready-v1`과 실행 코드는 같습니다.
 
 ## GPU 서버에서 코드 받기
 
@@ -10,12 +11,12 @@
 ```bash
 cd /home/xsailor4/taeho/serving-repos/infaas_deploy
 git status --short
-git fetch origin refs/heads/docker/cpu-ready-v1
-git checkout -b docker/cpu-ready-v1 FETCH_HEAD
+git fetch origin refs/heads/docker/v4
+git checkout -b docker/v4 FETCH_HEAD
 ```
 
-이미 브랜치를 만들었다면 `git checkout docker/cpu-ready-v1` 후
-`git pull --ff-only origin docker/cpu-ready-v1`로 갱신합니다.
+이미 브랜치를 만들었다면 `git checkout docker/v4` 후
+`git pull --ff-only origin docker/v4`로 갱신합니다.
 
 INFaaS의 PIL 경로는 이미 전처리 뒤 모델별 GPU 실행 큐에 텐서를 넣습니다.
 이번 변경은 독립 CPU 전처리 풀을 두어 다른 비교 구현과 단계·동시성 기본값을 맞춘 것입니다.
