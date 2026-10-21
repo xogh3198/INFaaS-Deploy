@@ -2,6 +2,9 @@
 
 저장소 루트에서 실행합니다. 사전 학습 가중치로 실제 GPU 추론을 수행합니다.
 
+**작업 단위 모델·배치 선택 실험:** [SINGLE_GPU_COST.md](SINGLE_GPU_COST.md).
+아래 안내는 기존 고정 모델·batch 1 스택이며, 새 모드와 결과를 구분합니다.
+
 CPU 전처리 → 텐서 큐 → GPU 실행 및 기존 설정 복구 내역은
 [CPU_READY_PIPELINE.md](CPU_READY_PIPELINE.md)를 먼저 확인하세요.
 기존 설정 보존 보정 패치와 전체 실험 조건: [EXPERIMENT_SETTINGS.md](EXPERIMENT_SETTINGS.md).

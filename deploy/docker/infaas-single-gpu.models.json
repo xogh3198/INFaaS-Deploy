@@ -1,0 +1,20 @@
+{
+  "models": {
+    "resnet-50": {
+      "enabled": true,
+      "model_id": "microsoft/resnet-50",
+      "revision": "34c2154c194f829b11125337b98c8f5f9965ff19",
+      "accuracy": 77.36,
+      "accuracy_source": "Proteus original resnet50_v1 reference; not measured for this HF checkpoint",
+      "accuracy_dataset": "imagenet-1k/top1/proteus-reference"
+    },
+    "resnet-18": {
+      "enabled": true,
+      "model_id": "microsoft/resnet-18",
+      "revision": "65a5785d9156231087c481e0c7dd33a5ff6f7e3e",
+      "accuracy": 70.93,
+      "accuracy_source": "Proteus original resnet18_v1 reference; not measured for this HF checkpoint",
+      "accuracy_dataset": "imagenet-1k/top1/proteus-reference"
+    }
+  }
+}
