@@ -15,10 +15,11 @@ from typing import Dict, List, Optional
 
 # (repo_id, category) in the exact order of CLAUDE.md's Model list.
 MODELS: List[tuple] = [
-    # IMAGE CLASSIFICATION (22)
+    # IMAGE CLASSIFICATION (23, including the opt-in comparison's ResNet-101)
     ("microsoft/resnet-18", "image-classification"),
     ("microsoft/resnet-34", "image-classification"),
     ("microsoft/resnet-50", "image-classification"),
+    ("microsoft/resnet-101", "image-classification"),
     ("google/vit-base-patch16-224", "image-classification"),
     ("google/vit-base-patch16-224-in21k", "image-classification"),
     ("facebook/deit-tiny-patch16-224", "image-classification"),
@@ -77,6 +78,7 @@ MODEL_AUTOCLASS: Dict[str, str] = {
     "microsoft/resnet-18": "AutoModelForImageClassification",
     "microsoft/resnet-34": "AutoModelForImageClassification",
     "microsoft/resnet-50": "AutoModelForImageClassification",
+    "microsoft/resnet-101": "AutoModelForImageClassification",
     "google/vit-base-patch16-224": "AutoModelForImageClassification",
     "google/vit-base-patch16-224-in21k": "AutoModel",
     "facebook/deit-tiny-patch16-224": "AutoModelForImageClassification",
