@@ -1,5 +1,7 @@
 # INFaaS-Deploy
 
+> **v1 / v2 ResNet 실험:** ResNet-18·34·50·101·152, 단일 V100, FP32 설정과 빌드·실행 명령은 [새 실험 안내](experiments/resnet/setting_readme.md)를 사용합니다. 아래는 기존 실행 경로의 설명입니다.
+
 GPU·모델·SLO 설정과 단계별 실행은 **[setting_readme.md](setting_readme.md)**를 참고하세요.
 
 Proteus와 동일한 CPU 전처리로 재실험하려면 **[CPU_PREPROCESSING.md](CPU_PREPROCESSING.md)**를 사용하세요.

@@ -1,5 +1,7 @@
 # INFaaS Docker 설정 및 실행
 
+> **v1 / v2 ResNet 실험:** ResNet-18·34·50·101·152, 단일 V100, FP32 설정과 빌드·실행 명령은 [새 실험 안내](experiments/resnet/setting_readme.md)를 사용합니다. 아래는 기존 실행 경로의 설명입니다.
+
 저장소 루트에서 실행합니다. 사전 학습 가중치로 실제 GPU 추론을 수행합니다.
 
 **작업 단위 모델·배치 선택 실험:** [SINGLE_GPU_COST.md](SINGLE_GPU_COST.md).

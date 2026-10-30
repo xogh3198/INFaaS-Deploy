@@ -1,1 +1,2 @@
 deploy/docker/*.sh text eol=lf
+experiments/resnet/*.sh text eol=lf

@@ -1,0 +1,8 @@
+**
+!experiments/
+!experiments/resnet/
+!experiments/resnet/**
+experiments/resnet/local.env
+experiments/resnet/generated/**
+!infaas/
+!infaas/**
