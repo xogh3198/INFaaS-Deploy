@@ -1,0 +1,7 @@
+{
+  "resnet-18": "65a5785d9156231087c481e0c7dd33a5ff6f7e3e",
+  "resnet-34": "4d180fbdc81b4d5d4eaa86ab89bdd669200dd477",
+  "resnet-50": "34c2154c194f829b11125337b98c8f5f9965ff19",
+  "resnet-101": "c2bf50f68263a35f102eb5c84ca91fc7352ceff3",
+  "resnet-152": "189229b1590873cc46c03813abc7d0a7cb8f02b2"
+}

@@ -1,0 +1,8 @@
+**
+!experiments/
+!experiments/reproduce/
+!experiments/reproduce/**
+!experiments/resnet/
+!experiments/resnet/**
+experiments/resnet/local.env
+experiments/resnet/generated/**
